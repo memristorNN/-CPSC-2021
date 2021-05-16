@@ -91,7 +91,8 @@ class RefInfo():
                 offset_range[self.beat_loc[af_end-3]: self.beat_loc[af_end-2]] += .5
         
         return onset_range, offset_range
-    
+
+
 def load_ans(ans_file):
     endpoints_pred = []
     if ans_file.endswith('.json'):
@@ -104,6 +105,7 @@ def load_ans(ans_file):
         endpoints_pred = ans_struct['predict_endpoints']-1
 
     return endpoints_pred
+
 
 def ue_calculate(endpoints_pred, endpoints_true, onset_score_range, offset_score_range):
     score = 0
@@ -118,10 +120,12 @@ def ue_calculate(endpoints_pred, endpoints_true, onset_score_range, offset_score
 
     return score
 
+
 def ur_calculate(class_true, class_pred):
     score = R[int(class_true), int(class_pred)]
 
     return score
+
 
 def score(data_path, ans_path):
     # AF burden estimation
@@ -158,6 +162,7 @@ def score(data_path, ans_path):
     score_avg = np.mean(SCORE)
 
     return score_avg
+
 
 if __name__ == '__main__':
     TESTSET_PATH = sys.argv[1]

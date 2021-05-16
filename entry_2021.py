@@ -8,6 +8,7 @@ os.chdir(sys.path[0])
 import wfdb
 from utils import qrs_detect, comp_cosEn, save_dict
 from tensorflow.keras.models import load_model
+import tensorflow as tf
 from scipy.signal import ellip, ellipord, filtfilt, lfilter, butter
 
 
@@ -26,32 +27,28 @@ def ngrams_rr(data, length):
     return grams
 
 
-def sig_filter(signal, fs):
-    rp, rs = 1, 20
-    wn = 2 * np.array([0.5, 35]) / fs  # Wn = 截止频率 / 信号频率，信号频率=采样率的一半
-    n = 5
-    b, a = ellip(n, rp, rs, wn, btype='bandpass')
-    return filtfilt(b, a, signal, axis=0, method='gust')
+def load_test_data(sample, length, fs):
+    sample = np.diff(sample) / fs
+
+    t_x = np.reshape(sample[:sample.shape[0] // length * length], (-1, length))
+    s_x = sample[-length:]
+    interval = sample.shape[0] - sample.shape[0] // length * length
+
+    return t_x, s_x, interval
 
 
-def load_test_data(signal, sample, interval=1):
-    test_x = np.zeros(shape=(1, length, 2))
+def dice_coef(y_true, y_pred, smooth=1):
+    intersection = tf.keras.backend.sum(y_true * y_pred, axis=-1)
+    union = tf.keras.backend.sum(y_true, axis=-1) + tf.keras.backend.sum(y_pred, axis=-1)
+    return tf.keras.backend.mean((2. * intersection + smooth) / (union + smooth), axis=0)
 
-    start = 0
-    while start + interval < len(sample):
-        cur_x = signal[sample[start]:sample[start+interval], :]
-        cur_x = (cur_x - mean) / std
 
-        if cur_x.shape[0] >= length:
-            cur_x = cur_x[:length, :]
-        else:
-            cur_x = np.vstack((cur_x, np.zeros(shape=(length-cur_x.shape[0], 2))))
+def dice_coef_loss(y_true, y_pred):
+    return 1 - dice_coef(y_true, y_pred, smooth=1)
 
-        test_x = np.vstack((test_x, [cur_x]))
 
-        start += interval
-
-    return test_x[1:]
+def calc_loss(y_true, y_pred):
+    return tf.keras.losses.binary_crossentropy(y_true, y_pred) + dice_coef_loss(y_true, y_pred)
 
 
 def to_num(array):
@@ -67,11 +64,16 @@ def smooth(array):
     return array
 
 
-def model_test(test_x, model, one_hot=True):
-    predict_y = model.predict(test_x)
+def model_test(test_x, model, interval):
+    predict_y = model.predict(np.expand_dims(test_x, 2))
+    predict_y[predict_y >= 0.5] = 1
+    predict_y[predict_y < 0.5] = 0
 
-    if one_hot:
-        return to_num(predict_y)
+    s_y = predict_y[-1]
+    predict_y = predict_y[:-1].ravel()
+    if interval > 0:
+        predict_y = np.hstack((predict_y, s_y[-interval:]))
+
     return predict_y
 
 
@@ -87,9 +89,11 @@ def challenge_entry(sample_path):
     r_peaks = qrs_detect(sig[:, 1], fs=200)
     print(r_peaks)
 
-    test_x = load_test_data(sig, r_peaks)
-    pred_y = model_test(test_x, model)
-    is_af = smooth(pred_y)
+    cur_x, single_x, interval = load_test_data(r_peaks, length, fs)
+
+    pred_y = model_test(np.vstack((cur_x, single_x)), model, interval)
+    # is_af = smooth(pred_y)
+    is_af = pred_y
 
     if np.sum(is_af) == len(is_af):
         end_points.append([0, len(sig)-1])
@@ -118,10 +122,8 @@ if __name__ == '__main__':
     if not os.path.exists(RESULT_PATH):
         os.makedirs(RESULT_PATH)
 
-    model = load_model('model/single_model.h5')
-    mean = np.load('model/mean.npy')
-    std = np.load('model/std.npy')
-    length = 1024
+    model = load_model('model/single_model.h5', custom_objects={'calc_loss': calc_loss})
+    length = 12
 
     test_set = open(os.path.join(DATA_PATH, 'RECORDS'), 'r').read().splitlines()
     for i, sample in enumerate(test_set):

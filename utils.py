@@ -284,7 +284,7 @@ def qrs_detect(ECG, fs):
 
 				peaks.extend(map(lambda n: n+j*winsize-5*fs, peak))
 
-	peaks = np.array(peaks)
+	peaks = np.array(peaks, dtype=int)
 	peaks = np.sort(peaks)
 	dp = np.abs(np.diff(peaks))
 
